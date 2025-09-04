@@ -19,8 +19,9 @@ templates: Jinja2Templates = Jinja2Templates(directory="templates")
 
 def _load_bundles() -> List[Dict[str, Any]]:
     bundles: List[Dict[str, Any]] = []
-    for p in sorted(DATA_DIR.glob("*.json")):
-        bundles.append(json.loads(p.read_text()))
+    bundles.extend(
+        json.loads(p.read_text()) for p in sorted(DATA_DIR.glob("*.json"))
+    )
     return bundles
 
 
@@ -33,11 +34,9 @@ def home(request: Request) -> HTMLResponse:
 
 @app.get("/doc/{doc_id}", response_class=HTMLResponse)
 def view_doc(doc_id: str, request: Request) -> HTMLResponse:
-    bundle: Dict[str, Any] | None = None
-    for b in _load_bundles():
-        if b["doc_id"] == doc_id:
-            bundle = b
-            break
+    bundle: Dict[str, Any] | None = next(
+        (b for b in _load_bundles() if b["doc_id"] == doc_id), None
+    )
     if bundle is None:
         return templates.TemplateResponse("index.html", {"request": request, "docs": []})
 

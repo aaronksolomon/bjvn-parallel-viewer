@@ -8,5 +8,5 @@ Phase I is viewer-only (no DB), serving JSON bundles and page scans.
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-uvicorn app:app --reload
+uvicorn app:app 
 # open http://127.0.0.1:8000

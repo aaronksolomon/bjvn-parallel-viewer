@@ -1,0 +1,72 @@
+<!doctype html>
+<html data-theme="emerald">
+<head>
+  <meta charset="utf-8">
+  <title>{{ bundle.title }}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script defer src="https://cdn.tailwindcss.com"></script>
+  <link href="https://cdn.jsdelivr.net/npm/daisyui@4.12.10/dist/full.min.css" rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/openseadragon/4.1.0/openseadragon.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/openseadragon/4.1.0/openseadragon.min.css"/>
+  <style>.anchor{scroll-margin-top:6rem}</style>
+</head>
+<body class="p-4">
+  <div class="navbar bg-base-100 mb-3 sticky top-0 z-10 border-b">
+    <div class="flex-1">
+      <a class="btn btn-ghost" href="/">← Back</a>
+      <span class="text-lg font-semibold ml-2">{{ bundle.title }}</span>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-3 gap-3 h-[calc(100vh-6rem)]">
+    <!-- Scan -->
+    <section class="border rounded-lg overflow-hidden">
+      <div id="osd" class="w-full h-full"></div>
+    </section>
+
+    <!-- Vietnamese -->
+    <section class="border rounded-lg p-3 overflow-auto">
+      <h2 class="font-medium mb-2">Vietnamese OCR</h2>
+      <div class="space-y-2">
+        {% for s in spans %}
+          <div id="{{ s.aid }}:vi" class="border rounded-md p-2">
+            <div class="text-xs text-gray-500">§ {{ s.aid }} · page {{ s.page }}</div>
+            <div class="mt-1">{{ s.vi|safe }}</div>
+            <div class="mt-2">
+              <button class="btn btn-xs btn-ghost" onclick="showPage({{ s.page }})">View page</button>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    </section>
+
+    <!-- English -->
+    <section class="border rounded-lg p-3 overflow-auto">
+      <h2 class="font-medium mb-2">English Translation</h2>
+      <div class="space-y-2">
+        {% for s in spans %}
+          <div id="{{ s.aid }}:en" class="border rounded-md p-2">
+            <div class="text-xs text-gray-500">§ {{ s.aid }} · page {{ s.page }}</div>
+            <div class="mt-1">{{ s.en|safe }}</div>
+            <div class="mt-2">
+              <button class="btn btn-xs btn-ghost" onclick="showPage({{ s.page }})">View page</button>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    </section>
+  </div>
+
+  <script>
+    let osd = OpenSeadragon({
+      id: "osd",
+      prefixUrl: "https://cdnjs.cloudflare.com/ajax/libs/openseadragon/4.1.0/images/",
+      tileSources: (await (await fetch("/page-src/{{ first_page }}")).json()).src
+    });
+
+    function showPage(page) {
+      fetch(`/page-src/${page}`).then(r => r.json()).then(p => osd.open(p.src));
+    }
+  </script>
+</body>
+</html>

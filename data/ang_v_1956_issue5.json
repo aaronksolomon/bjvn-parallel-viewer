@@ -1,0 +1,29 @@
+{
+  "doc_id": "ang_v_1956_issue5",
+  "title": "Phật Giáo Việt Nam — ANG.V",
+  "pages": [
+    { "page": 1, "image": "/images/angv_p001.jpg" },
+    { "page": 2, "image": "/images/angv_p002.jpg" }
+  ],
+  "sections": [
+    {
+      "sid": "s1",
+      "title_vi": "NHỮNG NGÀY HOAN-HỶ",
+      "title_en": "Joyful Days",
+      "spans": [
+        {
+          "aid": "angv:s1:p1",
+          "page": 1,
+          "vi": "nguyệt-sanh Phật-giáo Việt Nam ra trong tháng này nhằm hai...",
+          "en": "The Journal of Vietnamese Buddhism is published this month..."
+        },
+        {
+          "aid": "angv:s1:p2",
+          "page": 2,
+          "vi": "Sự pháp-minh ấy, cần được luôn luôn nhắc nhở...",
+          "en": "The manifestation of this discovery needs to be constantly reminded..."
+        }
+      ]
+    }
+  ]
+}
