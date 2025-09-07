@@ -1,6 +1,6 @@
 # JVB — Parallel Viewer
 
-FastAPI + Jinja2 + Tailwind/DaisyUI + OpenSeadragon viewer for the Journal of Vietnamese Buddhism (JVNB).
+FastAPI + Jinja2 + Tailwind/DaisyUI + OpenSeadragon viewer for the Journal of Vietnamese Buddhism (JVB).
 Phase I is viewer-only (no DB), serving JSON bundles and page scans.
 
 ## Run locally

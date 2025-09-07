@@ -450,7 +450,7 @@ def build_from_journal_dir(journal_dir: Path, out_dir: Path) -> Tuple[Optional[B
 
 def main(argv: Optional[List[str]] = None) -> int:
     # sourcery skip: use-fstring-for-concatenation
-    parser = argparse.ArgumentParser(description="Build BJVN JSON bundles from OCR + translation XML")
+    parser = argparse.ArgumentParser(description="Build JVB JSON bundles from OCR + translation XML")
     parser.add_argument("journal_dirs", nargs="+", type=Path,
                         help="One or more journal directories, each containing full_cleaned_*.xml, translation_*.xml, and images/")
     parser.add_argument("--out", type=Path, default=Path("data"),

@@ -1,4 +1,4 @@
-app = "bjvn-parallel-viewer"
+app = "jvb-parallel-viewer"
 
 [build]
   dockerfile = "Dockerfile"
