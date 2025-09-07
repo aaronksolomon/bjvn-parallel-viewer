@@ -55,6 +55,28 @@ def _extract_digits(s: str) -> Optional[int]:
     m = re.search(r"(\d+)", s)
     return int(m[1]) if m else None
 
+def _text_with_breaks(elem: ET.Element) -> str:
+    """
+    Extract text from an XML element, preserving <br/> as newline.
+    """
+    parts: List[str] = []
+
+    def rec(e: ET.Element):
+        if e.text:
+            parts.append(e.text)
+        for ch in list(e):
+            if (ch.tag or "").lower() == "br":
+                parts.append("\n")
+                if ch.tail:
+                    parts.append(ch.tail)
+                continue
+            rec(ch)
+            if ch.tail:
+                parts.append(ch.tail)
+
+    rec(elem)
+    return _norm("".join(parts))
+
 # ---------- Image helpers ----------
 
 def _iter_unannotated_images(images_dir: Path) -> List[Path]:
@@ -116,40 +138,120 @@ def parse_vi_ocr_xml(xml_path: Path) -> Dict[int, str]:
 
 def parse_en_translation_xml(xml_path: Path) -> Tuple[Dict[int, str], Optional[str]]:
     """
-    Parse English translation and aggregate text *per page* across sections.
-    Returns (en_by_page: {page: text}, doc_title: Optional[str]).
-    We preserve paragraph boundaries as newlines but do not force paragraph splitting.
+    Parse English translation and aggregate text *per page*, honoring <pagebreak page='X'/>.
+    Handles pagebreaks inside or outside <section>, collects <notes> and <translation-notes>
+    following a section, and preserves <br/> as newlines.
+
+    Returns:
+        (en_by_page: {page: text}, doc_title: Optional[str])
     """
     root = ET.parse(xml_path).getroot()
+
     en_buckets: Dict[int, List[str]] = {}
+    current_page: int = 1
     doc_title: Optional[str] = None
 
-    for sec in root.findall('.//section'):
-        title_el = sec.find('./title')
-        sec_title = _text_of(title_el) if title_el is not None else ''
-        if not doc_title and sec_title and len(sec_title) > 12:
-            doc_title = sec_title
-        for page_el in sec.findall('./page'):
-            page_num = _extract_digits(page_el.attrib.get('page', '')) or 1
-            if ps := page_el.findall('./p'):
-                if parts := [_text_of(p) for p in ps if _text_of(p)]:
-                    en_buckets.setdefault(page_num, []).append('\n\n'.join(parts))
-            elif txt := _text_of(page_el):
-                en_buckets.setdefault(page_num, []).append(txt)
+    def push(pg: int, text: str) -> None:
+        if text.strip():
+            en_buckets.setdefault(pg, []).append(text.strip())
 
-    # Fallback: handle translations that place <p> directly under <section>
-    # Only do this if we found no page-level content at all, to avoid overwriting/duplicating page 1.
-    if not en_buckets:
-        for sec in root.findall('.//section'):
-            if ps := sec.findall('./p'):
-                if parts := [_text_of(p) for p in ps if _text_of(p)]:
-                    blob = "\n\n".join(parts)
-                    page1 = en_buckets.setdefault(1, [])
-                    # De-dup the blob if it's already present
-                    if blob not in page1:
-                        page1.append(blob)
+    def maybe_set_title(title_text: str) -> None:
+        nonlocal doc_title
+        t = (title_text or "").strip()
+        if not t:
+            return
+        # Avoid 'Table of contents' as journal title
+        if t.lower() in {"table of contents", "table of content", "contents"}:
+            return
+        if doc_title is None:
+            doc_title = t
 
-    en_by_page: Dict[int, str] = {pg: '\n\n'.join(chunks) for pg, chunks in en_buckets.items()}
+    def page_from_attr(e: ET.Element) -> Optional[int]:
+        return _extract_digits(e.attrib.get("page", ""))
+
+    def collect_section(sec: ET.Element) -> None:
+        """
+        Process a <section>, respecting internal <pagebreak/> and adding its text to current_page.
+        """
+        nonlocal current_page
+        # Title (if present)
+        title_el = sec.find("./title")
+        if title_el is not None:
+            maybe_set_title(_text_with_breaks(title_el))
+
+        # Stream through children in order; flip page when we see <pagebreak/>
+        for child in list(sec):
+            tag = (child.tag or "").lower()
+            if tag == "pagebreak":
+                num = page_from_attr(child)
+                if num is not None:
+                    current_page = num
+                continue
+            if tag == "p":
+                push(current_page, _text_with_breaks(child))
+            elif tag in {"ul", "ol"}:
+                # Flatten lists into lines
+                items = []
+                for li in child.findall("./li"):
+                    items.append(_text_with_breaks(li))
+                if items:
+                    push(current_page, "\n".join(items))
+            elif tag == "title":
+                # already handled, but if there is trailing text in title, keep it
+                pass
+            else:
+                # Any other container: extract text conservatively
+                txt = _text_with_breaks(child)
+                if txt.strip():
+                    push(current_page, txt)
+
+    # We want to honor pagebreaks that can appear between sections too. Iterate top-level in order.
+    for node in list(root):
+        tag = (node.tag or "").lower()
+
+        if tag == "pagebreak":
+            num = page_from_attr(node)
+            if num is not None:
+                current_page = num
+            continue
+
+        if tag == "section":
+            collect_section(node)
+            continue
+
+        if tag in {"notes", "translation-notes"}:
+            # Attach notes to the most recent page we’re on.
+            # If notes contain multiple paragraphs, keep paragraph breaks.
+            paras = [ _text_with_breaks(p) for p in node.findall("./p") ]
+            if not paras:
+                # Sometimes notes are raw text
+                txt = _text_with_breaks(node)
+                if txt.strip():
+                    paras = [txt]
+            if paras:
+                header = "Notes" if tag == "notes" else "Translation notes"
+                push(current_page, f"{header}:\n" + "\n\n".join(paras))
+            continue
+
+        # Any other unexpected top-level node: if it contains pagebreaks or text, handle best-effort
+        inner_breaks = node.findall(".//pagebreak")
+        if inner_breaks:
+            # Walk depth-first and simulate what collect_section does
+            for sub in node.iter():
+                stag = (sub.tag or "").lower()
+                if stag == "pagebreak":
+                    num = page_from_attr(sub)
+                    if num is not None:
+                        current_page = num
+                elif stag == "p":
+                    push(current_page, _text_with_breaks(sub))
+        else:
+            # Plain text blob
+            txt = _text_with_breaks(node)
+            if txt.strip():
+                push(current_page, txt)
+
+    en_by_page: Dict[int, str] = {pg: "\n\n".join(chunks) for pg, chunks in en_buckets.items()}
     return en_by_page, doc_title
 
 
@@ -217,9 +319,8 @@ def validate_bundle(bundle: Bundle, images_dir: Path) -> List[ValidationIssue]:
             seen.add(sp.aid)
 
     # Check page numbers present and corresponding images exist (best-effort)
-    # We'll consider an image valid if any file in images_dir contains that page number.
     img_index: Dict[int, List[Path]] = {}
-    for p in sorted(list(images_dir.glob("*.png")) + list(images_dir.glob("*.jpg"))):
+    for p in _iter_unannotated_images(images_dir):
         num = _extract_digits(p.stem) or _extract_digits(p.name)
         if num is not None:
             img_index.setdefault(num, []).append(p)
