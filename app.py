@@ -1,6 +1,6 @@
 from __future__ import annotations
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 import json
 
 from fastapi import FastAPI, Request
@@ -18,11 +18,16 @@ templates: Jinja2Templates = Jinja2Templates(directory="templates")
 
 
 def _load_bundles() -> List[Dict[str, Any]]:
-    bundles: List[Dict[str, Any]] = []
-    bundles.extend(
-        json.loads(p.read_text()) for p in sorted(DATA_DIR.glob("*.json"))
-    )
-    return bundles
+    """Load all bundle JSON files from DATA_DIR."""
+    return [json.loads(p.read_text()) for p in sorted(DATA_DIR.glob("*.json"))]
+
+
+def _get_bundle(doc_id: str) -> Optional[Dict[str, Any]]:
+    for p in DATA_DIR.glob("*.json"):
+        b: Dict[str, Any] = json.loads(p.read_text())
+        if b.get("doc_id") == doc_id:
+            return b
+    return None
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -34,41 +39,75 @@ def home(request: Request) -> HTMLResponse:
 
 @app.get("/doc/{doc_id}", response_class=HTMLResponse)
 def view_doc(doc_id: str, request: Request) -> HTMLResponse:
-    bundle: Dict[str, Any] | None = next(
-        (b for b in _load_bundles() if b["doc_id"] == doc_id), None
-    )
+    bundle: Optional[Dict[str, Any]] = _get_bundle(doc_id)
     if bundle is None:
         return templates.TemplateResponse("index.html", {"request": request, "docs": []})
 
+    # Flatten spans and enrich with section context + alignment hints
     spans: List[Dict[str, Any]] = []
+    sid_to_titles: Dict[str, Tuple[str, str]] = {}
     for section in bundle.get("sections", []):
-        spans.extend(section.get("spans", []))
+        sid: str = section.get("sid", "")
+        sid_to_titles[sid] = (section.get("title_vi", ""), section.get("title_en", ""))
+        for sp in section.get("spans", []):
+            sp2 = dict(sp)
+            sp2["_section_sid"] = sid
+            tvi, ten = sid_to_titles[sid]
+            sp2["_section_title_vi"] = tvi
+            sp2["_section_title_en"] = ten
+            align = sp2.get("align") or {}
+            sp2["_align_status"] = align.get("status")
+            sp2["_align_method"] = align.get("method")
+            spans.append(sp2)
 
-    first_page: int = bundle["pages"][0]["page"] if bundle.get("pages") else 1
+    # Sort by page number for robust rendering
+    spans.sort(key=lambda s: int(s.get("page", 10**9)))
+
+    # Derive a safe first page from bundle pages
+    first_page: int = 1
+    if bundle.get("pages"):
+        try:
+            first_page = int(sorted(bundle["pages"], key=lambda p: int(p.get("page", 10**9)))[0]["page"])
+        except Exception:
+            first_page = 1
+
     return templates.TemplateResponse(
         "doc.html",
-        {"request": request, "bundle": bundle, "spans": spans, "first_page": first_page},
+        {
+            "request": request,
+            "bundle": bundle,
+            "spans": spans,
+            "first_page": first_page,
+        },
     )
 
 
 @app.get("/api/doc/{doc_id}.json", response_class=JSONResponse)
 def api_doc(doc_id: str) -> JSONResponse:
-    for p in DATA_DIR.glob("*.json"):
-        b: Dict[str, Any] = json.loads(p.read_text())
-        if b["doc_id"] == doc_id:
-            return JSONResponse(b)
+    bundle = _get_bundle(doc_id)
+    if bundle:
+        return JSONResponse(bundle)
     return JSONResponse({"error": "not found"}, status_code=404)
 
 
-@app.get("/page-src/{page}", response_class=JSONResponse)
-def page_src(page: int) -> JSONResponse:
-    # Derive page→image from filenames like angv_p001.jpg
-    pages: List[Dict[str, Any]] = []
-    for img in sorted(IMAGES_DIR.glob("*.jpg")):
-        digits: str = "".join(ch for ch in img.stem if ch.isdigit())
-        num: int = int(digits) if digits else 1
-        pages.append({"page": num, "src": f"/images/{img.name}"})
+@app.get("/api/doc/{doc_id}/page/{page}", response_class=JSONResponse)
+def api_doc_page(doc_id: str, page: int) -> JSONResponse:
+    """
+    Resolve image source for a given doc_id+page using the bundle's 'pages' array
+    as the source of truth (supports .png/.jpg/.jpeg and arbitrary filenames).
+    """
+    bundle = _get_bundle(doc_id)
+    if not bundle:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    pages: List[Dict[str, Any]] = bundle.get("pages", [])
     for p in pages:
-        if p["page"] == page:
-            return JSONResponse(p)
-    return JSONResponse(pages[0] if pages else {"page": 1, "src": ""})
+        try:
+            if int(p.get("page", -1)) == page:
+                src = p.get("image") or p.get("src") or ""
+                return JSONResponse({"page": page, "src": src})
+        except Exception:
+            continue
+    if pages:
+        p0 = sorted(pages, key=lambda x: int(x.get("page", 10**9)))[0]
+        return JSONResponse({"page": int(p0.get("page", 1)), "src": p0.get("image") or p0.get("src") or ""})
+    return JSONResponse({"page": 1, "src": ""})
